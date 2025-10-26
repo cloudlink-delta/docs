@@ -2,7 +2,7 @@
 > 
 > This is a provisional and incomplete draft of the CloudLink 5.1 "Delta" protocol. The features, commands, and schemas described are for discussion and are subject to change.
 >
-> Last revision: October 15, 2025 @ 6:02 PM EDT.
+> Last revision: October 26, 2025 @ 12:41 PM EDT.
 
 # CloudLink 5.1 ("Delta") Protocol
 
