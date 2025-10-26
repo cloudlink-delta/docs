@@ -25,17 +25,17 @@ All communication is considered "in-band" between peers. The packet schema is a 
   "payload": { ... },
   "origin": "...",
   "target": "...",
-  "ttl": 3,
+  "ttl": 1,
   "id": "...",
   "method": "..."
 }
 ```
 
-  * `opcode`: A string that defines the packet's purpose.
+  * `opcode`: **(Required)** A string that defines the packet's purpose.
   * `payload`: Any arbitrary JSON-serializable data.
-  * `origin`: **(Required if using a bridge)** The unique instance ID of the original peer that sent the message.
-  * `target`: **(Required if using a bridge)** The unique instance ID of the final recipient. This can be a specific peer ID or a broadcast indicator (e.g., `*`).
-  * `ttl`: **(Optional)** Time-To-Live. A number used for bridged/relayed messages. Each peer that forwards the message decrements this value. If `ttl` reaches 0, the packet is dropped.
+  * `origin`: **(Required for bridge/relay/broadacasts)** The unique instance ID of the original peer that sent the message.
+  * `target`: **(Required for bridge/relay/broadcasts)** The unique instance ID of the final recipient. This can be a specific peer ID or a broadcast indicator (e.g., `*`).
+  * `ttl`: **(Required)** Time-To-Live. A number used for bridged/relayed messages. Each peer decrements this value before interpreting the packet. If `ttl` is below 0, the packet will be dropped. The default value is 1.
   * `id` & `method`: Optional properties for variable/list synchronization.
 
 -----
@@ -47,40 +47,270 @@ These commands are sent directly between connected peers.
 | `opcode` | Description |
 | :--- | :--- |
 | **`NEGOTIATE`** | Sent by a client immediately after connecting to another peer. The `payload` contains an object with arbitrary key-value pairs detailing the client's capabilities (e.g., supported features, loaded plugins) for feature negotiation. |
-| **`HOST_LOBBY`** | Sent from a peer to its connections to announce it is the host of a lobby. The `payload` contains the lobby's state (name, password status, max players, etc.). |
-| **`REQUEST_JOIN`**| Sent from a new peer to any existing peer in a lobby to request entry. The receiving peer will forward this request to the current host. |
-| **`MANAGE_LOBBY`**| A dual-purpose command. Sent from the host to all peers to announce a change in the lobby's state (e.g., `{"method": "lock"}`). Also sent from a peer to the host to request an action (e.g., `{"method": "kick", ...}`). |
-| **`TRANSFER_HOST`** | Sent from the current host to another peer (`target`) to designate them as the new host. The recipient then sends a `HOST_LOBBY` broadcast. |
-| **`LOBBY_STATE`** | Sent by the host to a new peer in response to `REQUEST_JOIN`. The `payload` contains the complete current state of the lobby, granting entry. |
-| **`PEER_JOIN`** | Broadcast by the host to all peers when a new user has successfully joined. The `payload` is the new peer's user object. |
-| **`PEER_LEFT`** | Broadcast by the host when a peer disconnects. The `payload` contains the peer's ID. |
 | **`G_MSG`** | A Global Message. The sending peer sets `target` to `*` and sends it to its direct connections. Peers forward it based on the `ttl`. |
 | **`P_MSG`** | A Private Message. The `target` is a specific peer ID. Peers will attempt to bridge the message if not directly connected. |
 | `G_VAR`/`P_VAR` | Variable Sync message. Works like `G_MSG`/`P_MSG`. |
 | `G_LIST`/`P_LIST`| List Sync message. Works like `G_MSG`/`P_MSG`. |
 | `NEW_CHAN` | A control message sent to a `target` peer to negotiate a new, named data channel. |
+| `PING`/`PONG` | Control messages used for computing RTT. |
 | `HANGUP`/`DECLINE`| Voice call control signals sent to a specific `target` peer. |
+| `WARNING`/`VIOLATION`| State control messages. `WARNINGS` are safe and user-correctable. `VIOLATION`s will result in mandatory disconnects. |
+
+#### Packet-specific syntax
+
+##### **`NEGOTIATE`**
+**Negotiation is mandatory** for all variants of the Delta protocol.
+```js
+{
+  "opcode": "NEGOTIATE",
+  "payload": {
+    "version": {       // "version" is not intended for protocol versioning. It is purely for user-reference.
+      "type": string,  // Can be any value you want. Examples: Scratch, Go...
+      "major": int,
+      "minor": int,
+      "patch": int,
+    },
+    "spec_version": 0, // Spec version is recommended for protocol versioning. Leave as 0.
+    "plugins": [       // i.e. "chat", "sync", "discovery", ...
+      string...
+    ],
+    "is_bridge": bool,
+    "is_relay": bool,
+    "is_discovery": bool,
+  }
+}
+```
+
+##### **`PING`/`PONG`**
+Request messages start with `PING` and a `t1` value, containing a timestamp encoded as a numerical timestamp.
+
+```js
+{
+  "opcode": "PING",
+  "payload": {
+    t1: Date.now(),
+  },
+  "ttl": 1,
+}
+```
+
+A reply message to `PING` should contain the original `t1` timestamp as well as a new numerical timestamp in `t2`.
+
+```js
+{
+  "opcode": "PONG",
+  "payload": {
+    t1: (PING payload).t1;
+    t2: Date.now();
+  },
+  "ttl": 1,
+}
+```
 
 -----
 
-### Discovery Server Commands (Optional)
+### Discovery Server Commands
 
 These commands are used to interact with an optional Discovery Server for matchmaking and peer resolution.
 
 | `opcode` | Description |
 | :--- | :--- |
-| **`REGISTER_LOBBY`** | Sent by a host peer to the Discovery Server to make its lobby publicly listed. |
-| **`UNREGISTER_LOBBY`**| Sent by a host peer to remove its lobby listing from the Discovery Server. |
-| **`LIST_LOBBIES`** | Sent by any peer to request a list of all public lobbies. |
-| **`QUERY_PEER`** | Sent by any peer to resolve a `user@designation` address into a PeerJS connection ID. |
+| **`LOBBY_INFO`** | Requests specific details about a specified lobby ID. |
+| **`CONFIG_HOST`** | Creates a new lobby with a unique ID and settings. |
+| **`CONFIG_PEER`** | Joins a lobby with the specified ID and settings. |
+| **`LOBBY_LIST`** | Returns a list of all active, visible, password-free, and unlocked lobbies. |
+| `LOCK`/`UNLOCK` | Toggles the lock state of the lobby to prevent/allow new members from connecting. |
+| `SIZE`| Updates the maximum number of members allowed in the lobby. Set to -1 to allow unlimited members. |
+| `KICK` | Forcefully disconnects a member from the lobby. |
+| `HIDE`/`SHOW` | Toggles lobby visibility in the public lobby list, or through event broadcasts. |
+
+#### Packet-specific syntax
+
+##### **`CONFIG_HOST`**
+Requesting a lobby will use the following packet syntax:
+
+```js
+{
+  "opcode": "CONFIG_HOST",
+  "payload": {
+    "lobby_id": any, // must be serializable
+    "password": string,
+    "max_peers": int, // -1 or null = "unlimited", otherwise > 0
+    "locked": bool,
+    "hidden": bool,
+    "metadata": any,
+  },
+  "ttl": 1,
+}
+```
+
+If the specified ID exists:
+
+```js
+{
+  "opcode": "LOBBY_EXISTS",
+  "ttl": 1,
+}
+```
+
+A successful reply will return the following:
+
+```js
+{
+  "opcode": "CONFIG_HOST_ACK",
+  "payload": any, // lobby_id
+  "ttl": 1,
+}
+```
+
+Upon creation (if not `hidden`), the following will be broadcasted:
+
+```js
+{
+  "opcode": "NEW_LOBBY",
+  "payload": any, // lobby_id
+  "ttl": 1,
+}
+```
+
+##### **`CONFIG_PEER`**
+Joining a lobby will use the following packet syntax:
+
+```js
+{
+  "opcode": "CONFIG_PEER",
+  "payload": {
+    "lobby_id": any, // must be serializable
+    "password": string,
+  },
+  "ttl": 1,
+}
+```
+
+If the specified ID does not exist:
+
+```js
+{
+  "opcode": "LOBBY_NOTFOUND",
+  "ttl": 1,
+}
+```
+
+A successful reply will return the following:
+
+```js
+{
+  "opcode": "CONFIG_PEER_ACK",
+  "payload": string, // lobby_id
+  "ttl": 1,
+}
+```
+
+All members of the lobby (including the host) will be
+sent the following:
+
+```js
+{
+  "opcode": "PEER_JOIN",
+  "payload": string, // instance ID
+  "ttl": 1,
+}
+```
+
+Some lobbies may have a password set. If the lobby
+has one, three possible outcomes can occur.
+
+If the lobby has a password and the value of `password`
+is empty:
+
+```js
+{
+  "opcode": "PASSWORD_REQUIRED",
+  "ttl": 1,
+}
+```
+
+If the `password` value is invalid:
+
+```js
+{
+  "opcode": "PASSWORD_FAIL",
+  "ttl": 1,
+}
+```
+
+A valid `password` will return this before `CONFIG_PEER_ACK`:
+
+```js
+{
+  "opcode": "PASSWORD_ACK",
+  "ttl": 1,
+}
+```
+
+##### **`LOBBY_LIST`**
+Requesting the list does not take any arguments. 
+
+```js
+{
+  "opcode": "LOBBY_LIST",
+  "ttl": 1,
+}
+```
+
+The response will return a list of lobbies. This will also be sent to the client upon initial connection to the discovery server.
+
+```js
+{
+  "opcode": "LOBBY_LIST",
+  "payload": [any...], // values will be serialized
+  "ttl": 1,
+}
+```
+
+##### **`LOBBY_INFO`**
+Requesting info requires a target.
+
+```js
+{
+  "opcode": "LOBBY_INFO",
+  "payload": any, // target, must be serializable
+  "ttl": 1,
+}
+```
+
+The response will return an object.
+
+```js
+{
+  "opcode": "LOBBY_INFO",
+  "payload": {
+    "lobby_id": any,
+    "host": string, // host instance ID
+    "current_peers": int,
+    "max_peers": int,
+    "hidden": bool,
+    "locked": bool,
+    "metadata": any,
+  }
+  "ttl": 1,
+}
+```
 
 -----
 
-### Relay Server Commands (Optional)
+### Bridge Server Commands
 
 These commands are used to bridge communication with clients on older CL2/3/4 protocols.
 
 | `opcode` | Description |
 | :--- | :--- |
-| **`RELAY_MSG`** | Sent from a CL5.1 client to the Relay Server. The `payload` contains the original CL5.1 packet and a `legacy_target` field specifying the older client. The Relay translates and forwards the message. |
-| **`BRIDGE_MSG`** | Sent from the Relay Server to a CL5.1 client when a message arrives from a legacy client. The `payload` contains the translated message and information about the legacy sender. |
+| **`...`** | . . . |
+
+### Relay Server Commands
+
+These commands are used to improve the performance of broadcast messages.
+
+| `opcode` | Description |
+| :--- | :--- |
+| **`...`** | . . . |
