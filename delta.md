@@ -27,7 +27,8 @@ All communication is considered "in-band" between peers. The packet schema is a 
   "target": "...",
   "ttl": 1,
   "id": "...",
-  "method": "..."
+  "method": "...",
+  "listener": "...",
 }
 ```
 
@@ -37,6 +38,7 @@ All communication is considered "in-band" between peers. The packet schema is a 
   * `target`: **(Required for bridge/relay/broadcasts)** The unique instance ID of the final recipient. This can be a specific peer ID or a broadcast indicator (e.g., `*`).
   * `ttl`: **(Required)** Time-To-Live. A number used for bridged/relayed messages. Each peer decrements this value before interpreting the packet. If `ttl` is below 0, the packet will be dropped. The default value is 1.
   * `id` & `method`: Optional properties for variable/list synchronization.
+  * `listener`: Optional property to tag packets and await responses.
 
 -----
 
@@ -51,12 +53,68 @@ These commands are sent directly between connected peers.
 | **`P_MSG`** | A Private Message. The `target` is a specific peer ID. Peers will attempt to bridge the message if not directly connected. |
 | `G_VAR`/`P_VAR` | Variable Sync message. Works like `G_MSG`/`P_MSG`. |
 | `G_LIST`/`P_LIST`| List Sync message. Works like `G_MSG`/`P_MSG`. |
+| `G_MESH` | A global event broadcast. Can be a one-and-done or can await on all recipients. |
+| `P_MESH` | A private event broadcast. Can be a one-and-done or can await on the recipient. |
 | `NEW_CHAN` | A control message sent to a `target` peer to negotiate a new, named data channel. |
 | `PING`/`PONG` | Control messages used for computing RTT. |
 | `HANGUP`/`DECLINE`| Voice call control signals sent to a specific `target` peer. |
 | `WARNING`/`VIOLATION`| State control messages. `WARNINGS` are safe and user-correctable. `VIOLATION`s will result in mandatory disconnects. |
 
 #### Packet-specific syntax
+
+##### **`G_MSG`/`P_MSG`
+The most common event. Designed for simple messaging or updates.
+```js
+{
+  "opcode": "G_MSG" | "P_MSG",
+  "payload": ...,
+  "ttl": 1,
+}
+```
+
+##### **`G_VAR`/`P_VAR`
+Used in the Sync plugin to synchronize global/local variables. `payload` can be any serializable type,  `id` must be a string, and they need to be unique, and they need to be unique.
+```js
+{
+  "opcode": "G_VAR" | "P_VAR",
+  "payload": ...,
+  "id": string, // network tag
+  "ttl": 1,
+}
+```
+
+##### **`G_LIST`/`P_LIST`
+Used in the Sync plugin to synchronize global/local lists. `payload` can be a single instance (or an array) of serializable type(s) `id` must be a string, and they need to be unique. `method` is mandatory.
+```js
+{
+  "opcode": "G_LIST" | "P_LIST",
+  "payload": ...,
+  "method": 'reset' | 'set' | 'update' | 'replace',
+  "id": string, // network tag
+  "ttl": 1,
+}
+```
+
+##### **`G_MESH`/`P_MESH`
+Used in the Sync plugin for simple broadcasts. `payload` must be a string. `method` is mandatory. **`G_MESH`/`P_MESH` may only be used on the default data channel.**
+```js
+{
+  "opcode": "G_MESH" | "P_MESH",
+  "payload": string, // broadcast name
+  "method": '' | 'req',
+  "ttl": 1,
+}
+```
+
+If a sent `G_MESH`/`P_MESH`'s `method` has an `req`, recipients are expected to reply with the following once all event threads have finished execution.
+```js
+{
+  "opcode": "G_MESH" | "P_MESH",
+  
+  "method": 'ack',
+  "ttl": 1,
+}
+```
 
 ##### **`NEGOTIATE`**
 **Negotiation is mandatory** for all variants of the Delta protocol.
