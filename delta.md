@@ -49,12 +49,12 @@ These commands are sent directly between connected peers.
 | `opcode` | Description |
 | :--- | :--- |
 | **`NEGOTIATE`** | Sent by a client immediately after connecting to another peer. The `payload` contains an object with arbitrary key-value pairs detailing the client's capabilities (e.g., supported features, loaded plugins) for feature negotiation. |
-| **`G_MSG`** | A Global Message. The sending peer sets `target` to `*` and sends it to its direct connections. Peers forward it based on the `ttl`. |
+| `G_MSG`** | A Global Message. The sending peer sets `target` to `*` and sends it to its direct connections. Peers forward it based on the `ttl`. |
 | **`P_MSG`** | A Private Message. The `target` is a specific peer ID. Peers will attempt to bridge the message if not directly connected. |
 | `G_VAR`/`P_VAR` | Variable Sync message. Works like `G_MSG`/`P_MSG`. |
 | `G_LIST`/`P_LIST`| List Sync message. Works like `G_MSG`/`P_MSG`. |
-| `G_MESH` | A global event broadcast. Can be a one-and-done or can await on all recipients. |
-| `P_MESH` | A private event broadcast. Can be a one-and-done or can await on the recipient. |
+| `G_MESH` | A simple RPC broadcast. Can be a one-and-done or can wait for all recipients to finish performing tasks. |
+| `P_MESH` | A simple RPC unicast. Can be a one-and-done or can wait for the recipient to finish performing tasks. |
 | `NEW_CHAN` | A control message sent to a `target` peer to negotiate a new, named data channel. |
 | `PING`/`PONG` | Control messages used for computing RTT. |
 | `HANGUP`/`DECLINE`| Voice call control signals sent to a specific `target` peer. |
@@ -62,7 +62,7 @@ These commands are sent directly between connected peers.
 
 #### Packet-specific syntax
 
-##### **`G_MSG`/`P_MSG`
+##### **`G_MSG`/`P_MSG`**
 The most common event. Designed for simple messaging or updates.
 ```js
 {
@@ -72,7 +72,7 @@ The most common event. Designed for simple messaging or updates.
 }
 ```
 
-##### **`G_VAR`/`P_VAR`
+##### **`G_VAR`/`P_VAR`**
 Used in the Sync plugin to synchronize global/local variables. `payload` can be any serializable type,  `id` must be a string, and they need to be unique, and they need to be unique.
 ```js
 {
@@ -83,7 +83,7 @@ Used in the Sync plugin to synchronize global/local variables. `payload` can be 
 }
 ```
 
-##### **`G_LIST`/`P_LIST`
+##### **`G_LIST`/`P_LIST`**
 Used in the Sync plugin to synchronize global/local lists. `payload` can be a single instance (or an array) of serializable type(s) `id` must be a string, and they need to be unique. `method` is mandatory.
 ```js
 {
@@ -95,8 +95,8 @@ Used in the Sync plugin to synchronize global/local lists. `payload` can be a si
 }
 ```
 
-##### **`G_MESH`/`P_MESH`
-Used in the Sync plugin for simple broadcasts. `payload` must be a string. `method` is mandatory. **`G_MESH`/`P_MESH` may only be used on the default data channel.**
+##### **`G_MESH`/`P_MESH`**
+Used in the Sync plugin as a simple RPC (Remote Procedure Call). `payload` must be a string. `method` is mandatory. `G_MESH`/`P_MESH` may only be used on the default data channel.**
 ```js
 {
   "opcode": "G_MESH" | "P_MESH",
@@ -106,11 +106,11 @@ Used in the Sync plugin for simple broadcasts. `payload` must be a string. `meth
 }
 ```
 
-If a sent `G_MESH`/`P_MESH`'s `method` has an `req`, recipients are expected to reply with the following once all event threads have finished execution.
+If a sent `G_MESH`/`P_MESH`'s `method` has an `req`, recipients are expected to reply with the following once all RPC threads have finished execution.
 ```js
 {
   "opcode": "G_MESH" | "P_MESH",
-  
+  "payload": string, // broadcast name
   "method": 'ack',
   "ttl": 1,
 }
