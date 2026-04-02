@@ -2,7 +2,7 @@
 > 
 > This is a provisional and incomplete draft of the CloudLink 5.1 "Delta" protocol. The features, commands, and schemas described are for discussion and are subject to change.
 >
-> Last revision: October 26, 2025 @ 12:41 PM EDT.
+> Last revision: April 2, 2026 @ 6:52 PM EDT.
 
 # CloudLink 5.1 ("Delta") Protocol
 
@@ -49,16 +49,17 @@ These commands are sent directly between connected peers.
 | `opcode` | Description |
 | :--- | :--- |
 | **`NEGOTIATE`** | Sent by a client immediately after connecting to another peer. The `payload` contains an object with arbitrary key-value pairs detailing the client's capabilities (e.g., supported features, loaded plugins) for feature negotiation. |
-| `G_MSG`** | A Global Message. The sending peer sets `target` to `*` and sends it to its direct connections. Peers forward it based on the `ttl`. |
+| **`G_MSG`** | A Global Message. The sending peer sets `target` to `*` and sends it to its direct connections. Peers forward it based on the `ttl`. |
 | **`P_MSG`** | A Private Message. The `target` is a specific peer ID. Peers will attempt to bridge the message if not directly connected. |
-| `G_VAR`/`P_VAR` | Variable Sync message. Works like `G_MSG`/`P_MSG`. |
-| `G_LIST`/`P_LIST`| List Sync message. Works like `G_MSG`/`P_MSG`. |
-| `G_MESH` | A simple RPC broadcast. Can be a one-and-done or can wait for all recipients to finish performing tasks. |
-| `P_MESH` | A simple RPC unicast. Can be a one-and-done or can wait for the recipient to finish performing tasks. |
-| `NEW_CHAN` | A control message sent to a `target` peer to negotiate a new, named data channel. |
-| `PING`/`PONG` | Control messages used for computing RTT. |
-| `HANGUP`/`DECLINE`| Voice call control signals sent to a specific `target` peer. |
-| `WARNING`/`VIOLATION`| State control messages. `WARNINGS` are safe and user-correctable. `VIOLATION`s will result in mandatory disconnects. |
+| **`G_VAR`/`P_VAR`** | Variable Sync message. Works like `G_MSG`/`P_MSG`. |
+| **`G_LIST`/`P_LIST`** | List Sync message. Works like `G_MSG`/`P_MSG`. |
+| **`G_MESH`** | A simple RPC broadcast. Can be a one-and-done or can wait for all recipients to finish performing tasks. |
+| **`P_MESH`** | A simple RPC unicast. Can be a one-and-done or can wait for the recipient to finish performing tasks. |
+| **`NEW_CHAN`** | A control message sent to a `target` peer to negotiate a new, named data channel. |
+| **`PING`/`PONG`** | Control messages used for computing RTT. |
+| **`CALL`/`ANSWER`/`HANGUP`/`DECLINE`** | Voice call control signals sent to a specific `target` peer. |
+| **`WARNING`/`VIOLATION`** | State control messages. `WARNINGS` are safe and user-correctable. `VIOLATION`s will result in mandatory disconnects. |
+| **`HELLO`** | Advertises peer's preferred name and designation info. Only used if it has support for the discovery feature/plugin. |
 
 #### Packet-specific syntax
 
@@ -160,6 +161,20 @@ A reply message to `PING` should contain the original `t1` timestamp as well as 
   "payload": {
     t1: (PING payload).t1;
     t2: Date.now();
+  },
+  "ttl": 1,
+}
+```
+
+##### **`HELLO`**
+Advertises peer's preferred name and designation info. Only used if it has support for the discovery feature/plugin.
+
+```js
+{
+  "opcode": "HELLO",
+  "payload": {
+    name: string;        // "SOMEBODY"
+    designation: string; // "US-NKY-1"
   },
   "ttl": 1,
 }
