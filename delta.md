@@ -1,23 +1,17 @@
-> **⚠️ WARNING! HERE BE DRAGONS! ⚠️**
-> 
-> This is a provisional and incomplete draft of the CloudLink 5.1 "Delta" protocol. The features, commands, and schemas described are for discussion and are subject to change.
->
-> Last revision: April 2, 2026 @ 6:52 PM EDT.
-
 # CloudLink 5.1 ("Delta") Protocol
 
-CL5.1 "Delta" is a revision of the CloudLink 5 protocol that transitions to a **fully decentralized, pure peer-to-peer network** as its core. It removes the reliance on a mandatory central session server.
+CL5.1 "Delta" is a revision of the CloudLink 5 protocol that transitions to a **WebRTC-based peer-to-peer network** as its core data layer. 
 
-To enhance this core, the protocol introduces two optional, P2P-based server types:
+While pure P2P data transfer is the primary goal, the protocol still requires a mandatory **Signaling Server** (e.g., a standard PeerJS server) to exchange initial connection parameters (ICE candidates, SDP offers/answers). Once connected, peers communicate directly.
 
-  * A **Discovery Server** can be used to help peers find each other and negotiate lobbies using a `user@designation` system.
-  * A **Bridge Server** can be used to translate communications between CL5.1 clients and clients running legacy CL2/3/4 protocols.
-
-Key concepts include decentralized lobby controls, host migration, and a mesh-like message bridging system.
+To enhance this core, the protocol introduces optional, specialized server/client roles:
+* A **Discovery Server** to help peers find each other, negotiate lobbies, and resolve `username@designation` identities (e.g. `discovery@SOMEWHERE-EARTH`).
+* A **Bridge Server** (Reserved for future use) to translate communications between CL5.1 clients and clients running legacy CL2/3/4 protocols.
+* A **Relay Server** (Reserved for future use) to optimize mesh networking and broadcasts.
 
 ## Protocol Schema
 
-All communication is considered "in-band" between peers. The packet schema is a JSON object with optional keys to support advanced routing.
+All communication is formatted as "in-band" JSON payloads sent across WebRTC DataChannels.
 
 ```js
 {
@@ -28,362 +22,129 @@ All communication is considered "in-band" between peers. The packet schema is a 
   "ttl": 1,
   "id": "...",
   "method": "...",
-  "listener": "...",
+  "listener": "..."
 }
 ```
 
-  * `opcode`: **(Required)** A string that defines the packet's purpose.
-  * `payload`: Any arbitrary JSON-serializable data.
-  * `origin`: **(Required for bridge/relay/broadacasts)** The unique instance ID of the original peer that sent the message.
-  * `target`: **(Required for bridge/relay/broadcasts)** The unique instance ID of the final recipient. This can be a specific peer ID or a broadcast indicator (e.g., `*`).
-  * `ttl`: **(Required)** Time-To-Live. A number used for bridged/relayed messages. Each peer decrements this value before interpreting the packet. If `ttl` is below 0, the packet will be dropped. The default value is 1.
-  * `id` & `method`: Optional properties for variable/list synchronization.
-  * `listener`: Optional property to tag packets and await responses.
+* `opcode`: **(Required)** A string that defines the packet's purpose.
+* `payload`: Any arbitrary JSON-serializable data.
+* `origin`: **(Required for bridge/relay/broadcasts)** The unique instance ID of the original peer that sent the message.
+* `target`: **(Required for bridge/relay/broadcasts)** The unique instance ID of the final recipient. This can be a specific peer ID or a broadcast indicator (`*`).
+* `ttl`: **(Required)** Time-To-Live. Included for forward-compatibility with multi-hop mesh routing. Currently, reference clients require `ttl >= 0` to accept a packet but execute 1-hop direct broadcasts without decrementing. The default value is `1`.
+* `id` & `method`: Optional properties for variable/list synchronization and RPC handling.
+* `listener`: Optional property to tag packets and await responses (used primarily in Mesh/RPC commands).
 
------
+---
 
-### Peer-to-Peer Commands
+## Peer-to-Peer Commands
 
 These commands are sent directly between connected peers.
 
 | `opcode` | Description |
 | :--- | :--- |
-| **`NEGOTIATE`** | Sent by a client immediately after connecting to another peer. The `payload` contains an object with arbitrary key-value pairs detailing the client's capabilities (e.g., supported features, loaded plugins) for feature negotiation. |
-| **`G_MSG`** | A Global Message. The sending peer sets `target` to `*` and sends it to its direct connections. Peers forward it based on the `ttl`. |
-| **`P_MSG`** | A Private Message. The `target` is a specific peer ID. Peers will attempt to bridge the message if not directly connected. |
-| **`G_VAR`/`P_VAR`** | Variable Sync message. Works like `G_MSG`/`P_MSG`. |
-| **`G_LIST`/`P_LIST`** | List Sync message. Works like `G_MSG`/`P_MSG`. |
-| **`G_MESH`** | A simple RPC broadcast. Can be a one-and-done or can wait for all recipients to finish performing tasks. |
-| **`P_MESH`** | A simple RPC unicast. Can be a one-and-done or can wait for the recipient to finish performing tasks. |
-| **`NEW_CHAN`** | A control message sent to a `target` peer to negotiate a new, named data channel. |
-| **`PING`/`PONG`** | Control messages used for computing RTT. |
-| **`CALL`/`ANSWER`/`HANGUP`/`DECLINE`** | Voice call control signals sent to a specific `target` peer. |
-| **`WARNING`/`VIOLATION`** | State control messages. `WARNINGS` are safe and user-correctable. `VIOLATION`s will result in mandatory disconnects. |
-| **`HELLO`** | Advertises peer's preferred name and designation info. Only used if it has support for the discovery feature/plugin. |
+| **`NEGOTIATE`** | Sent immediately upon opening the default channel. Contains an object detailing the client's capabilities (version, plugins, roles). |
+| **`G_MSG`** / **`P_MSG`** | Global/Private Message. `G_MSG` targets `*` (broadcast to all direct connections), while `P_MSG` targets a specific peer ID. |
+| **`G_VAR`** / **`P_VAR`** | Variable Sync message. Synchronizes state across peers. |
+| **`G_LIST`** / **`P_LIST`** | List Sync message. Synchronizes array states across peers using specific mutation methods. |
+| **`G_MESH`** / **`P_MESH`** | RPC (Remote Procedure Call) broadcasts/unicasts. If the `method` is `req`, recipients must reply with an `ack`. |
+| **`NEW_CHAN`** | Control message sent to negotiate a new, named WebRTC data channel. |
+| **`PING`** / **`PONG`** | Control messages used for computing Round-Trip Time (RTT) and clock offset synchronization. |
+| **`CALL`** / **`ANSWER`** / **`HANGUP`** / **`DECLINE`** | Voice call signaling used to orchestrate WebRTC MediaStreams. |
+| **`WARNING`** / **`VIOLATION`** | State control messages. `WARNING`s are user-correctable. `VIOLATION`s trigger an immediate, mandatory client-side disconnect sequence. |
+| **`HELLO`** | Advertises a peer's preferred name and designation. Used by the Discovery plugin to populate local identity caches. |
 
-#### Packet-specific syntax
+### Packet-Specific Syntax (P2P)
 
-##### **`G_MSG`/`P_MSG`**
-The most common event. Designed for simple messaging or updates.
-```js
-{
-  "opcode": "G_MSG" | "P_MSG",
-  "payload": ...,
-  "ttl": 1,
-}
-```
-
-##### **`G_VAR`/`P_VAR`**
-Used in the Sync plugin to synchronize global/local variables. `payload` can be any serializable type,  `id` must be a string, and they need to be unique, and they need to be unique.
-```js
-{
-  "opcode": "G_VAR" | "P_VAR",
-  "payload": ...,
-  "id": string, // network tag
-  "ttl": 1,
-}
-```
-
-##### **`G_LIST`/`P_LIST`**
-Used in the Sync plugin to synchronize global/local lists. `payload` can be a single instance (or an array) of serializable type(s) `id` must be a string, and they need to be unique. `method` is mandatory.
+#### **`G_LIST` / `P_LIST`**
+Used to synchronize global/local lists. `payload` depends on the `method`. The `id` must be a unique string (network tag).
 ```js
 {
   "opcode": "G_LIST" | "P_LIST",
   "payload": ...,
-  "method": 'reset' | 'set' | 'update' | 'replace',
-  "id": string, // network tag
-  "ttl": 1,
+  "method": "reset" | "set" | "length" | "replace",
+  "id": "my_network_tag",
+  "ttl": 1
 }
 ```
 
-##### **`G_MESH`/`P_MESH`**
-Used in the Sync plugin as a simple RPC (Remote Procedure Call). `payload` must be a string. `method` is mandatory. `G_MESH`/`P_MESH` may only be used on the default data channel.**
+#### **`G_MESH` / `P_MESH`**
+Used for Remote Procedure Calls. May only be sent on the `default` data channel.
 ```js
 {
   "opcode": "G_MESH" | "P_MESH",
-  "payload": string, // broadcast name
-  "method": '' | 'req',
-  "ttl": 1,
+  "payload": "eventName",
+  "method": "" | "req",
+  "listener": "uuid-string-here", // Required if method is 'req'
+  "ttl": 1
 }
 ```
-
-If a sent `G_MESH`/`P_MESH`'s `method` has an `req`, recipients are expected to reply with the following once all RPC threads have finished execution.
+Recipients of a `req` method must execute the RPC and reply with:
 ```js
 {
   "opcode": "G_MESH" | "P_MESH",
-  "payload": string, // broadcast name
-  "method": 'ack',
-  "ttl": 1,
+  "payload": "eventName",
+  "method": "ack",
+  "listener": "uuid-string-here",
+  "ttl": 1
 }
 ```
 
-##### **`NEGOTIATE`**
-**Negotiation is mandatory** for all variants of the Delta protocol.
-```js
-{
-  "opcode": "NEGOTIATE",
-  "payload": {
-    "version": {       // "version" is not intended for protocol versioning. It is purely for user-reference.
-      "type": string,  // Can be any value you want. Examples: Scratch, Go...
-      "major": int,
-      "minor": int,
-      "patch": int,
-    },
-    "spec_version": 0, // Spec version is recommended for protocol versioning. Leave as 0.
-    "plugins": [       // i.e. "chat", "sync", "discovery", ...
-      string...
-    ],
-    "is_bridge": bool,
-    "is_relay": bool,
-    "is_discovery": bool,
-  }
-}
-```
+---
 
-##### **`PING`/`PONG`**
-Request messages start with `PING` and a `t1` value, containing a timestamp encoded as a numerical timestamp.
+## Discovery Server Commands
 
-```js
-{
-  "opcode": "PING",
-  "payload": {
-    t1: Date.now(),
-  },
-  "ttl": 1,
-}
-```
+Discovery features are optional. When enabled, clients connect to a designated server (e.g., `discovery@SOMEWHERE-EARTH`) to resolve user identities and negotiate matchmaking lobbies. 
 
-A reply message to `PING` should contain the original `t1` timestamp as well as a new numerical timestamp in `t2`.
-
-```js
-{
-  "opcode": "PONG",
-  "payload": {
-    t1: (PING payload).t1;
-    t2: Date.now();
-  },
-  "ttl": 1,
-}
-```
-
-##### **`HELLO`**
-Advertises peer's preferred name and designation info. Only used if it has support for the discovery feature/plugin.
-
-```js
-{
-  "opcode": "HELLO",
-  "payload": {
-    name: string;        // "SOMEBODY"
-    designation: string; // "US-NKY-1"
-  },
-  "ttl": 1,
-}
-```
-
------
-
-### Discovery Server Commands
-
-These commands are used to interact with an optional Discovery Server for matchmaking and peer resolution.
+### Client -> Server Requests
 
 | `opcode` | Description |
 | :--- | :--- |
-| **`LOBBY_INFO`** | Requests specific details about a specified lobby ID. |
-| **`CONFIG_HOST`** | Creates a new lobby with a unique ID and settings. |
-| **`CONFIG_PEER`** | Joins a lobby with the specified ID and settings. |
-| **`LOBBY_LIST`** | Returns a list of all active, visible, password-free, and unlocked lobbies. |
-| `LOCK`/`UNLOCK` | Toggles the lock state of the lobby to prevent/allow new members from connecting. |
-| `SIZE`| Updates the maximum number of members allowed in the lobby. Set to -1 to allow unlimited members. |
-| `KICK` | Forcefully disconnects a member from the lobby. |
-| `HIDE`/`SHOW` | Toggles lobby visibility in the public lobby list, or through event broadcasts. |
+| **`REGISTER`** | Registers the client's preferred username with the server. |
+| **`QUERY`** | Requests the `username@designation` mapping for a specific instance ID. |
+| **`LOBBY_LIST`** | Requests an array of all active, visible, unlocked lobbies. |
+| **`LOBBY_INFO`** | Requests detailed metadata about a specific lobby ID. |
+| **`CONFIG_HOST`** | Requests the creation of a new lobby. |
+| **`CONFIG_PEER`** | Requests to join an existing lobby. |
+| **`LOCK`** / **`UNLOCK`** | (Host) Toggles if new members can join. |
+| **`HIDE`** / **`SHOW`** | (Host) Toggles visibility in the public `LOBBY_LIST`. |
+| **`SIZE`** | (Host) Updates max capacity (`-1` for unlimited). |
+| **`PASSWORD`** | (Host) Sets or updates the lobby password. |
+| **`KICK`** | (Host) Forcefully removes a peer from the lobby. |
+| **`TRANSFER`** | (Host) Transfers host privileges to another peer. |
+| **`CLOSE`** | (Host) Shuts down the lobby, disconnecting all members. |
+| **`LEAVE`** | (Peer) Gracefully exits the current lobby. |
 
-#### Packet-specific syntax
+### Server -> Client Events & Acknowledgments
 
-##### **`CONFIG_HOST`**
-Requesting a lobby will use the following packet syntax:
+| `opcode` | Description |
+| :--- | :--- |
+| **`REGISTER_ACK`** | Confirms successful username registration. |
+| **`QUERY_ACK`** | Returns the identity mapping for a requested peer. |
+| **`CONFIG_HOST_ACK`** | Confirms successful lobby creation. |
+| **`CONFIG_PEER_ACK`** | Confirms successful lobby join. |
+| **`LOBBY_EXISTS`** | Error: Attempted to host a lobby ID that is already taken. |
+| **`LOBBY_NOTFOUND`** | Error: Attempted to join or query a lobby that doesn't exist. |
+| **`PASSWORD_ACK`** | Confirms a lobby password change was successful. |
+| **`PASSWORD_REQUIRED`** | Error: Attempted to join a lobby without providing a required password. |
+| **`PASSWORD_FAIL`** | Error: Provided an incorrect lobby password. |
+| **`CONFIG_REQUIRED`** | Error: Attempted to perform a lobby action without being in a lobby. |
+| **`NEW_LOBBY`** | Broadcasted to all peers when a new (public) lobby is created. |
+| **`PEER_JOIN`** | Sent to lobby members when a new peer joins, prompting P2P connection attempts. |
+| **`PEER_LEFT`** | Sent to lobby members when a peer leaves. |
+| **`KICK_ACK`** | Sent to the Host to confirm a kick was successful/failed. |
+| **`KICKED`** | Sent to a peer to notify them they have been forcefully removed. |
+| **`TRANSITION`** | Informs a peer their role has changed (e.g., promoted to `host` or demoted to `peer`). |
+| **`CLOSE_ACK`** / **`LOBBY_CLOSED`** | Confirms the lobby was shut down. |
+| **`LEAVE_ACK`** | Confirms the client successfully exited the lobby. |
 
-```js
-{
-  "opcode": "CONFIG_HOST",
-  "payload": {
-    "lobby_id": any, // must be serializable
-    "password": string,
-    "max_peers": int, // -1 or null = "unlimited", otherwise > 0
-    "locked": bool,
-    "hidden": bool,
-    "metadata": any,
-  },
-  "ttl": 1,
-}
-```
+---
 
-If the specified ID exists:
+## Future Implementations
 
-```js
-{
-  "opcode": "LOBBY_EXISTS",
-  "ttl": 1,
-}
-```
-
-A successful reply will return the following:
-
-```js
-{
-  "opcode": "CONFIG_HOST_ACK",
-  "payload": any, // lobby_id
-  "ttl": 1,
-}
-```
-
-Upon creation (if not `hidden`), the following will be broadcasted:
-
-```js
-{
-  "opcode": "NEW_LOBBY",
-  "payload": any, // lobby_id
-  "ttl": 1,
-}
-```
-
-##### **`CONFIG_PEER`**
-Joining a lobby will use the following packet syntax:
-
-```js
-{
-  "opcode": "CONFIG_PEER",
-  "payload": {
-    "lobby_id": any, // must be serializable
-    "password": string,
-  },
-  "ttl": 1,
-}
-```
-
-If the specified ID does not exist:
-
-```js
-{
-  "opcode": "LOBBY_NOTFOUND",
-  "ttl": 1,
-}
-```
-
-A successful reply will return the following:
-
-```js
-{
-  "opcode": "CONFIG_PEER_ACK",
-  "payload": string, // lobby_id
-  "ttl": 1,
-}
-```
-
-All members of the lobby (including the host) will be
-sent the following:
-
-```js
-{
-  "opcode": "PEER_JOIN",
-  "payload": string, // instance ID
-  "ttl": 1,
-}
-```
-
-Some lobbies may have a password set. If the lobby
-has one, three possible outcomes can occur.
-
-If the lobby has a password and the value of `password`
-is empty:
-
-```js
-{
-  "opcode": "PASSWORD_REQUIRED",
-  "ttl": 1,
-}
-```
-
-If the `password` value is invalid:
-
-```js
-{
-  "opcode": "PASSWORD_FAIL",
-  "ttl": 1,
-}
-```
-
-A valid `password` will return this before `CONFIG_PEER_ACK`:
-
-```js
-{
-  "opcode": "PASSWORD_ACK",
-  "ttl": 1,
-}
-```
-
-##### **`LOBBY_LIST`**
-Requesting the list does not take any arguments. 
-
-```js
-{
-  "opcode": "LOBBY_LIST",
-  "ttl": 1,
-}
-```
-
-The response will return a list of lobbies. This will also be sent to the client upon initial connection to the discovery server.
-
-```js
-{
-  "opcode": "LOBBY_LIST",
-  "payload": [any...], // values will be serialized
-  "ttl": 1,
-}
-```
-
-##### **`LOBBY_INFO`**
-Requesting info requires a target.
-
-```js
-{
-  "opcode": "LOBBY_INFO",
-  "payload": any, // target, must be serializable
-  "ttl": 1,
-}
-```
-
-The response will return an object.
-
-```js
-{
-  "opcode": "LOBBY_INFO",
-  "payload": {
-    "lobby_id": any,
-    "host": string, // host instance ID
-    "current_peers": int,
-    "max_peers": int,
-    "hidden": bool,
-    "locked": bool,
-    "metadata": any,
-  }
-  "ttl": 1,
-}
-```
-
------
+The following server types are reserved in the `NEGOTIATE` payload (`is_bridge`, `is_relay`) but are currently undocumented and lack implementation in the reference client architecture.
 
 ### Bridge Server Commands
-
-These commands are used to bridge communication with clients on older CL2/3/4 protocols.
-
-| `opcode` | Description |
-| :--- | :--- |
-| **`...`** | . . . |
+Reserved for translating communication between CL5.1 clients and legacy CL2/3/4 protocols over WebSockets.
 
 ### Relay Server Commands
-
-These commands are used to improve the performance of broadcast messages.
-
-| `opcode` | Description |
-| :--- | :--- |
-| **`...`** | . . . |
+Reserved for True Mesh capabilities, offloading bandwidth-heavy broadcasts from client connections to dedicated relay nodes utilizing `ttl` decrements.
