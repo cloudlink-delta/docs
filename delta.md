@@ -118,6 +118,7 @@ Discovery features are optional. When enabled, clients connect to a designated s
 
 | `opcode` | Description |
 | :--- | :--- |
+| **`DISCOVER`** | Announces the presence of another server that needs to be connected by the client. Currently, it only announces bridge servers. |
 | **`REGISTER_ACK`** | Confirms successful username registration. |
 | **`QUERY_ACK`** | Returns the identity mapping for a requested peer. |
 | **`CONFIG_HOST_ACK`** | Confirms successful lobby creation. |
@@ -136,6 +137,7 @@ Discovery features are optional. When enabled, clients connect to a designated s
 | **`TRANSITION`** | Informs a peer their role has changed (e.g., promoted to `host` or demoted to `peer`). |
 | **`CLOSE_ACK`** / **`LOBBY_CLOSED`** | Confirms the lobby was shut down. |
 | **`LEAVE_ACK`** | Confirms the client successfully exited the lobby. |
+| **`AUTO_REGISTER`** | Confirms successful automatic username registration. Only implemented for bridge servers at this time. |
 
 ---
 
